@@ -22,158 +22,19 @@ interface Message {
   };
 }
 
-// In-memory knowledge graph responses for realistic developer queries
-const PRESET_QUERIES: Record<
-  string,
-  {
-    answer: string;
-    nodesTraversed: number;
-    time: number;
-    confidence: string;
-    evidence: EvidenceNode[];
-  }
-> = {
-  turbopack: {
-    answer:
-      "We adopted Turbopack in ADR-042 after monorepo benchmark runs showed Webpack HMR latency exceeding 8.2s. During the transition, an associated WebSocket teardown memory leak (Issue-1082) was identified and resolved in PR #214 by forcing TCP socket drains prior to AST cache updates.",
-    nodesTraversed: 4,
-    time: 0.32,
-    confidence: "high confidence",
-    evidence: [
-      {
-        id: "ev-1",
-        type: "Decision",
-        meta: "DECISION · ADR-042 · 2026-03-12 · APPROVED",
-        description:
-          "Adopted Turbopack as the default development bundler across all workspaces to reduce cold-start latency from 8.2s to under 1.1s.",
-      },
-      {
-        id: "ev-2",
-        type: "Reason",
-        meta: "REASON · BENCHMARK-Q1 · DEVEX INITIATIVE",
-        description:
-          "Legacy Webpack configurations were encountering out-of-memory errors on monorepo micro-frontends during repeated HMR rebuilds.",
-      },
-      {
-        id: "ev-3",
-        type: "Bug",
-        meta: "BUG · ISSUE-1082 · HIGH PRIORITY · RESOLVED",
-        description:
-          "Persistent memory leak in development server socket teardown causing gradual node process heap degradation after 2+ hours.",
-      },
-      {
-        id: "ev-4",
-        type: "Fix",
-        meta: "FIX · PR #214 · MERGED · COMMIT 8f3d1b9",
-        description:
-          "Added an explicit socket drain listener and forced TCP RST timeout hook during watcher teardown cycles.",
-      },
-    ],
-  },
-  redis: {
-    answer:
-      "The Redis connection pool exhaustion bug (Issue-884) was traced to unclosed read replicas during traffic spikes. We migrated session caching to a distributed key-ring structure in ADR-038 and patched client pooling in PR #199.",
-    nodesTraversed: 5,
-    time: 0.41,
-    confidence: "high confidence",
-    evidence: [
-      {
-        id: "ev-r1",
-        type: "Bug",
-        meta: "BUG · ISSUE-884 · P1 CRITICAL · RESOLVED",
-        description:
-          "Connection pool exhaustion occurred during 99th percentile traffic surges due to non-recycled read-replica leases.",
-      },
-      {
-        id: "ev-r2",
-        type: "Reason",
-        meta: "REASON · POST-MORTEM-INCIDENT-402",
-        description:
-          "Default ioredis client retry backoff was unbounded, flooding nodes with synthetic reconnection storms during failovers.",
-      },
-      {
-        id: "ev-r3",
-        type: "Fix",
-        meta: "FIX · PR #199 · MERGED · SHA 4b791cf",
-        description:
-          "Introduced circuit breaker middleware with exponential jitter backoff and a hard ceiling of 50 active pooled connections per pod.",
-      },
-      {
-        id: "ev-r4",
-        type: "Decision",
-        meta: "DECISION · ADR-038 · 2026-02-18 · APPROVED",
-        description:
-          "Standardized on Valkey/Redis cluster read-through cache with strict TTL quotas to prevent memory fragmentation.",
-      },
-    ],
-  },
-  auth: {
-    answer:
-      "In ADR-031, we transitioned from stateful database sessions to short-lived asymmetric Ed25519 JWT tokens with refresh token rotation. A race condition vulnerability during concurrent tab refresh was mitigated in PR #167.",
-    nodesTraversed: 4,
-    time: 0.28,
-    confidence: "high confidence",
-    evidence: [
-      {
-        id: "ev-a1",
-        type: "Decision",
-        meta: "DECISION · ADR-031 · 2026-01-24 · APPROVED",
-        description:
-          "Migrated auth layer to Ed25519 signed JWTs with 15-minute expiry and sliding-window refresh token rotation.",
-      },
-      {
-        id: "ev-a2",
-        type: "Reason",
-        meta: "REASON · SCALE-ROADMAP-2026",
-        description:
-          "Central PostgreSQL session lookup was accounting for 34% of global query latency on authenticated API routes.",
-      },
-      {
-        id: "ev-a3",
-        type: "Bug",
-        meta: "BUG · ISSUE-741 · SECURITY-AUDIT · RESOLVED",
-        description:
-          "Concurrent API calls from multi-tab browser clients triggered false-positive token reuse invalidation alerts.",
-      },
-      {
-        id: "ev-a4",
-        type: "Fix",
-        meta: "FIX · PR #167 · MERGED · SHA e931fa2",
-        description:
-          "Implemented a 10-second grace window for consumed refresh tokens to handle parallel tab dispatch gracefully.",
-      },
-    ],
-  },
-};
-
-// Seed conversation and initial graph evidence
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: "seed-user-1",
-    role: "user",
-    content:
-      "Why did we switch to Turbopack, and was the WebSocket memory leak resolved?",
-  },
-  {
-    id: "seed-assistant-1",
-    role: "assistant",
-    content:
-      "We adopted Turbopack in ADR-042 after monorepo benchmark runs showed Webpack HMR latency exceeding 8.2s. During the transition, an associated WebSocket teardown memory leak (Issue-1082) was identified and resolved in PR #214 by forcing TCP socket drains prior to AST cache updates.",
-    meta: {
-      nodesTraversed: 4,
-      time: 0.32,
-      confidence: "high confidence",
-    },
-  },
-];
-
-const INITIAL_EVIDENCE: EvidenceNode[] = PRESET_QUERIES.turbopack.evidence;
-
 export default function DeveloperAssistantPage() {
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
-  const [evidence, setEvidence] = useState<EvidenceNode[]>(INITIAL_EVIDENCE);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [evidence, setEvidence] = useState<EvidenceNode[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isTraversing, setIsTraversing] = useState(false);
+
+  // Store Node Modal state
+  const [isStoreOpen, setIsStoreOpen] = useState(false);
+  const [newType, setNewType] = useState<NodeType>("Decision");
+  const [newMeta, setNewMeta] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [isStoring, setIsStoring] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -184,95 +45,127 @@ export default function DeveloperAssistantPage() {
     scrollToBottom();
   }, [messages, isTraversing]);
 
-  const handleAsk = (queryText?: string) => {
+  // LIVE QUERY: Sends user query to the database and displays the response
+  const handleAsk = async (queryText?: string) => {
     const text = (queryText ?? inputValue).trim();
     if (!text || isTraversing) return;
 
-    const userMessage: Message = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: text,
-    };
+    // 1. Append user message to chat stream
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `user-${Date.now()}`,
+        role: "user",
+        content: text,
+      },
+    ]);
 
-    setMessages((prev) => [...prev, userMessage]);
     setInputValue("");
     setIsTraversing(true);
 
-    // Realistic traversal simulation
-    setTimeout(() => {
-      const lower = text.toLowerCase();
-      let matchedData = PRESET_QUERIES.turbopack;
+    try {
+      // 2. Send query to backend live database endpoint
+      const response = await fetch("/api/debug", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bug: text }),
+      });
 
-      if (
-        lower.includes("redis") ||
-        lower.includes("cache") ||
-        lower.includes("pool") ||
-        lower.includes("exhaustion")
-      ) {
-        matchedData = PRESET_QUERIES.redis;
-      } else if (
-        lower.includes("auth") ||
-        lower.includes("token") ||
-        lower.includes("jwt") ||
-        lower.includes("session")
-      ) {
-        matchedData = PRESET_QUERIES.auth;
-      } else {
-        // Dynamic contextual response for arbitrary developer queries
-        const randomTime = +(0.25 + Math.random() * 0.22).toFixed(2);
-        const nodeCount = 3 + Math.floor(Math.random() * 3);
-        matchedData = {
-          answer: `Traversed project graph for "${text}". Found active architectural consensus and linked bug mitigation records across historical commits and ADR docs.`,
-          nodesTraversed: nodeCount,
-          time: randomTime,
-          confidence: "high confidence",
-          evidence: [
-            {
-              id: `ev-dyn-1-${Date.now()}`,
-              type: "Decision",
-              meta: `DECISION · ADR-0${30 + Math.floor(Math.random() * 20)} · 2026-02-14 · ACTIVE`,
-              description: `Architecture record governing: ${text.slice(0, 75)}${text.length > 75 ? "…" : ""}. Standardized module contracts and boundary isolation.`,
-            },
-            {
-              id: `ev-dyn-2-${Date.now()}`,
-              type: "Reason",
-              meta: "REASON · SYSTEM-PERF-ANALYSIS · Q1 REVIEW",
-              description:
-                "Identified non-deterministic latency spikes and thread contention in underlying microservice telemetry.",
-            },
-            {
-              id: `ev-dyn-3-${Date.now()}`,
-              type: "Bug",
-              meta: `BUG · ISSUE-${1000 + Math.floor(Math.random() * 500)} · RESOLVED · QA VERIFIED`,
-              description:
-                "Intermittent race condition identified during concurrent IO dispatch under peak distributed loads.",
-            },
-            {
-              id: `ev-dyn-4-${Date.now()}`,
-              type: "Fix",
-              meta: `FIX · PR #${200 + Math.floor(Math.random() * 90)} · MERGED · MAIN`,
-              description:
-                "Patched synchronization primitive with atomic read-write barriers and validated against regression test suite.",
-            },
-          ],
-        };
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to query Neo4j database.");
       }
 
-      const assistantMessage: Message = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: matchedData.answer,
-        meta: {
-          nodesTraversed: matchedData.nodesTraversed,
-          time: matchedData.time,
-          confidence: matchedData.confidence,
+      // 3. Render real assistant response from database
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: data.answer || "No response generated from graph evidence.",
+          meta: {
+            nodesTraversed: data.nodesTraversed ?? (data.evidence?.length || 0),
+            time: typeof data.time === "number" ? data.time : 0,
+            confidence: data.confidence ?? "high confidence",
+          },
         },
-      };
+      ]);
 
-      setMessages((prev) => [...prev, assistantMessage]);
-      setEvidence(matchedData.evidence);
+      // 4. Render real traversed graph evidence cards
+      const validTypes: NodeType[] = ["Decision", "Reason", "Bug", "Fix"];
+      const returnedEvidence: EvidenceNode[] = Array.isArray(data.evidence)
+        ? data.evidence.map((node: any, index: number) => ({
+            id: String(node.id ?? `evidence-${index}`),
+            type: validTypes.includes(node.type as NodeType)
+              ? (node.type as NodeType)
+              : "Decision",
+            meta: String(node.meta ?? "GRAPH EVIDENCE"),
+            description: String(
+              node.description ?? "No description available."
+            ),
+          }))
+        : [];
+
+      setEvidence(returnedEvidence);
+    } catch (error: any) {
+      console.error("Ask query failed:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          content: `Error querying database: ${
+            error?.message || "Check server connection and try again."
+          }`,
+        },
+      ]);
+    } finally {
       setIsTraversing(false);
-    }, 380);
+    }
+  };
+
+  // STORE NODE: Persists custom node directly into live Neo4j AuraDB
+  const handleStoreNode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDesc.trim() || isStoring) return;
+
+    setIsStoring(true);
+    try {
+      const res = await fetch("/api/store", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: newType,
+          meta:
+            newMeta.trim() ||
+            `${newType.toUpperCase()} · MANUAL ENTRY · ${
+              new Date().toISOString().split("T")[0]
+            }`,
+          description: newDesc.trim(),
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const created: EvidenceNode = {
+          id: data.node.id,
+          type: newType,
+          meta: data.node.meta,
+          description: data.node.description,
+        };
+        setEvidence((prev) => [created, ...prev]);
+        setNewMeta("");
+        setNewDesc("");
+        setIsStoreOpen(false);
+      }
+    } catch (err) {
+      console.error("Failed to store node:", err);
+    } finally {
+      setIsStoring(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -282,11 +175,6 @@ export default function DeveloperAssistantPage() {
     }
   };
 
-  // Color mapping strictly according to requirements:
-  // Decision: tan/beige (#F4EFE6)
-  // Reason: same tan (#F4EFE6)
-  // Bug: orange-tinted (#FDF0E6)
-  // Fix: green-tinted (#EDF7ED)
   const getNodeColorStyles = (type: NodeType) => {
     switch (type) {
       case "Decision":
@@ -330,58 +218,73 @@ export default function DeveloperAssistantPage() {
 
         {/* Scrollable Message Area */}
         <main className="flex-1 overflow-y-auto px-7 py-6 space-y-6">
-          {messages.map((msg) => {
-            if (msg.role === "user") {
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto px-4">
+              <div className="w-10 h-10 rounded-full border border-[#E5E3DA] bg-white flex items-center justify-center text-[#1F1E1B] font-bold text-sm mb-3">
+                PM
+              </div>
+              <h2 className="text-base font-bold text-[#1F1E1B]">
+                Connected to Neo4j Project Memory
+              </h2>
+              <p className="mt-1 text-xs text-[#73726C] leading-relaxed">
+                Ask about past engineering decisions, bug post-mortems, or PR
+                fixes. Every query runs live Cypher traversals against your
+                Neo4j database.
+              </p>
+            </div>
+          ) : (
+            messages.map((msg) => {
+              if (msg.role === "user") {
+                return (
+                  <div key={msg.id} className="flex justify-end">
+                    <div
+                      className="max-w-[78%] px-4 py-3 text-sm leading-relaxed text-white rounded-[14px] rounded-br-[2px]"
+                      style={{ backgroundColor: "#1F1E1B" }}
+                    >
+                      {msg.content}
+                    </div>
+                  </div>
+                );
+              }
+
               return (
-                <div key={msg.id} className="flex justify-end">
-                  <div
-                    className="max-w-[78%] px-4 py-3 text-sm leading-relaxed text-white rounded-[14px] rounded-br-[2px]"
-                    style={{ backgroundColor: "#1F1E1B" }}
-                  >
+                <div
+                  key={msg.id}
+                  className="flex flex-col items-start space-y-2 max-w-[85%]"
+                >
+                  <div className="px-4 py-3 text-sm leading-relaxed text-[#1F1E1B] bg-white border border-[#E5E3DA] rounded-[14px] rounded-bl-[2px]">
                     {msg.content}
                   </div>
+
+                  {msg.meta && (
+                    <div className="flex items-center space-x-2 pl-1 text-xs text-[#73726C]">
+                      <span>
+                        {msg.meta.nodesTraversed} nodes traversed ·{" "}
+                        {msg.meta.time}s
+                      </span>
+                      <span>•</span>
+                      <span
+                        className="px-2 py-0.5 text-[11px] font-medium rounded-full"
+                        style={{
+                          backgroundColor: "#D4EFDF",
+                          color: "#145A32",
+                        }}
+                      >
+                        {msg.meta.confidence}
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
-            }
-
-            return (
-              <div
-                key={msg.id}
-                className="flex flex-col items-start space-y-2 max-w-[85%]"
-              >
-                {/* Assistant Bubble */}
-                <div className="px-4 py-3 text-sm leading-relaxed text-[#1F1E1B] bg-white border border-[#E5E3DA] rounded-[14px] rounded-bl-[2px]">
-                  {msg.content}
-                </div>
-
-                {/* Assistant Metadata Row */}
-                {msg.meta && (
-                  <div className="flex items-center space-x-2 pl-1 text-xs text-[#73726C]">
-                    <span>
-                      {msg.meta.nodesTraversed} nodes traversed · {msg.meta.time}s
-                    </span>
-                    <span>•</span>
-                    <span
-                      className="px-2 py-0.5 text-[11px] font-medium rounded-full"
-                      style={{
-                        backgroundColor: "#D4EFDF",
-                        color: "#145A32",
-                      }}
-                    >
-                      {msg.meta.confidence}
-                    </span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+            })
+          )}
 
           {/* In-flight Traversal Indicator */}
           {isTraversing && (
             <div className="flex flex-col items-start space-y-2 max-w-[85%]">
               <div className="px-4 py-3 text-sm leading-relaxed text-[#73726C] bg-white border border-[#E5E3DA] rounded-[14px] rounded-bl-[2px] flex items-center space-x-2">
                 <span className="inline-block w-2 h-2 rounded-full bg-[#73726C] animate-pulse" />
-                <span>Traversing knowledge graph...</span>
+                <span>Traversing live Neo4j database...</span>
               </div>
             </div>
           )}
@@ -389,35 +292,50 @@ export default function DeveloperAssistantPage() {
           <div ref={messagesEndRef} />
         </main>
 
-        {/* Suggested Quick Inquiries */}
+        {/* Suggested Live Query Chips */}
         <div className="px-7 pt-2 pb-1 flex flex-wrap items-center gap-2 text-xs text-[#73726C] shrink-0">
           <span className="font-medium text-[11px] uppercase tracking-wide">
             Try:
           </span>
           <button
             type="button"
-            onClick={() => handleAsk("Why did we switch to Turbopack?")}
-            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs"
+            onClick={() =>
+              handleAsk("Why were users logged out unexpectedly every 5 minutes?")
+            }
+            disabled={isTraversing}
+            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs disabled:opacity-40"
           >
-            Turbopack migration
+            5-min logout bug
           </button>
           <button
             type="button"
             onClick={() =>
-              handleAsk("What caused the Redis connection leak bug?")
+              handleAsk("What was the fix for gRPC timeout errors on payment confirmation?")
             }
-            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs"
+            disabled={isTraversing}
+            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs disabled:opacity-40"
           >
-            Redis connection leak
+            gRPC payment timeout
           </button>
           <button
             type="button"
             onClick={() =>
-              handleAsk("What was the decision on auth JWT refresh tokens?")
+              handleAsk("What caused memory usage spikes under concurrent logins?")
             }
-            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs"
+            disabled={isTraversing}
+            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs disabled:opacity-40"
           >
-            Auth token rotation
+            Concurrent login memory spike
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              handleAsk("Why did we add rate limiting to api-gateway?")
+            }
+            disabled={isTraversing}
+            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs disabled:opacity-40"
+          >
+            API gateway rate limiter
           </button>
         </div>
 
@@ -444,7 +362,7 @@ export default function DeveloperAssistantPage() {
               className="px-6 py-3 text-sm font-medium text-white rounded-[10px] transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed shrink-0"
               style={{ backgroundColor: "#1F1E1B" }}
             >
-              Ask
+              {isTraversing ? "Asking..." : "Ask"}
             </button>
           </form>
         </footer>
@@ -460,13 +378,113 @@ export default function DeveloperAssistantPage() {
       >
         {/* Header Bar */}
         <header className="px-6 py-5 border-b border-[#E5E3DA] bg-[#F7F6F2] flex items-center justify-between shrink-0">
-          <div className="text-[11px] font-semibold tracking-wider text-[#73726C] uppercase leading-tight">
-            GRAPH EVIDENCE
+          <div className="flex items-center gap-2">
+            <div className="text-[11px] font-semibold tracking-wider text-[#73726C] uppercase leading-tight">
+              GRAPH EVIDENCE
+            </div>
+            <span className="text-xs font-medium text-[#73726C] px-2 py-0.5 rounded-[6px] border border-[#E5E3DA] bg-white">
+              {evidence.length} nodes
+            </span>
           </div>
-          <span className="text-xs font-medium text-[#73726C] px-2 py-0.5 rounded-[6px] border border-[#E5E3DA] bg-white">
-            {evidence.length} nodes
-          </span>
+
+          <button
+            type="button"
+            onClick={() => setIsStoreOpen(true)}
+            className="text-xs font-medium text-[#1F1E1B] px-2.5 py-1 rounded-[6px] border border-[#E5E3DA] bg-white hover:bg-[#E5E3DA] transition-colors cursor-pointer"
+          >
+            + Store Node
+          </button>
         </header>
+
+        {/* Store Node Modal */}
+        {isStoreOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-none">
+            <div
+              className="w-full max-w-md bg-[#F7F6F2] border border-[#E5E3DA] rounded-[12px] p-6 text-[#1F1E1B]"
+              style={{ boxShadow: "none" }}
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-[#E5E3DA]">
+                <div>
+                  <div className="text-[11px] font-semibold text-[#73726C] uppercase tracking-wider">
+                    NEO4J AURADB
+                  </div>
+                  <h3 className="text-base font-bold text-[#1F1E1B]">
+                    Store Graph Node
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsStoreOpen(false)}
+                  className="text-lg text-[#73726C] hover:text-[#1F1E1B] p-1 leading-none cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleStoreNode} className="mt-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#73726C] uppercase tracking-wide mb-1">
+                    Node Type
+                  </label>
+                  <select
+                    value={newType}
+                    onChange={(e) => setNewType(e.target.value as NodeType)}
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E3DA] rounded-[8px] outline-none"
+                  >
+                    <option value="Decision">Decision (Tan / Beige)</option>
+                    <option value="Reason">Reason (Tan / Beige)</option>
+                    <option value="Bug">Bug (Orange-tinted)</option>
+                    <option value="Fix">Fix (Green-tinted)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#73726C] uppercase tracking-wide mb-1">
+                    Metadata Label Line
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. DECISION · ADR-055 · 2026-04-12 · APPROVED"
+                    value={newMeta}
+                    onChange={(e) => setNewMeta(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E3DA] rounded-[8px] outline-none placeholder-[#8A8880]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#73726C] uppercase tracking-wide mb-1">
+                    Description Text
+                  </label>
+                  <textarea
+                    required
+                    rows={3}
+                    placeholder="Describe the architectural decision, bug details, or fix implementation..."
+                    value={newDesc}
+                    onChange={(e) => setNewDesc(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E3DA] rounded-[8px] outline-none placeholder-[#8A8880] resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E5E3DA]">
+                  <button
+                    type="button"
+                    onClick={() => setIsStoreOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-[#73726C] hover:text-[#1F1E1B] cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!newDesc.trim() || isStoring}
+                    className="px-4 py-2 text-xs font-medium text-white bg-[#1F1E1B] rounded-[8px] hover:bg-[#33312B] transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isStoring ? "Saving to Neo4j..." : "Save Node"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Vertical Stack of Color-Coded Cards */}
         <div className="flex-1 overflow-y-auto p-6 space-y-3.5">
@@ -489,12 +507,9 @@ export default function DeveloperAssistantPage() {
                     boxShadow: "none",
                   }}
                 >
-                  {/* Small gray label line */}
                   <div className="text-[11px] font-semibold text-[#73726C] tracking-wide uppercase leading-tight">
                     {node.meta}
                   </div>
-
-                  {/* Node description text */}
                   <p className="mt-1.5 text-sm text-[#1F1E1B] leading-relaxed">
                     {node.description}
                   </p>
@@ -507,4 +522,3 @@ export default function DeveloperAssistantPage() {
     </div>
   );
 }
-
