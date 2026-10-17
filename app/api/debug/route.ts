@@ -202,7 +202,7 @@ Rules:
       nodesTraversed: evidence.length,
       time: durationSeconds,
       confidence:
-        evidence.length > 0 ? "high confidence" : "no matching evidence",
+        evidence.length > 0 ? " " : "no matching evidence",
     });
   } catch (error: any) {
     console.error("Live Neo4j query error:", error);

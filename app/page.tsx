@@ -96,7 +96,7 @@ export default function DeveloperAssistantPage() {
           meta: {
             nodesTraversed: data.nodesTraversed ?? (data.evidence?.length || 0),
             time: typeof data.time === "number" ? data.time : 0,
-            confidence: data.confidence ?? "high confidence",
+            confidence: data.confidence ?? "",
           },
         },
       ]);
@@ -113,15 +113,15 @@ export default function DeveloperAssistantPage() {
       ];
       const returnedEvidence: EvidenceNode[] = Array.isArray(data.evidence)
         ? data.evidence.map((node: any, index: number) => ({
-            id: String(node.id ?? `evidence-${index}`),
-            type: validTypes.includes(node.type as NodeType)
-              ? (node.type as NodeType)
-              : "Component",
-            meta: String(node.meta ?? "GRAPH EVIDENCE"),
-            description: String(
-              node.description ?? "No description available."
-            ),
-          }))
+          id: String(node.id ?? `evidence-${index}`),
+          type: validTypes.includes(node.type as NodeType)
+            ? (node.type as NodeType)
+            : "Component",
+          meta: String(node.meta ?? "GRAPH EVIDENCE"),
+          description: String(
+            node.description ?? "No description available."
+          ),
+        }))
         : [];
 
       setEvidence(returnedEvidence);
@@ -132,9 +132,8 @@ export default function DeveloperAssistantPage() {
         {
           id: `error-${Date.now()}`,
           role: "assistant",
-          content: `Error querying database: ${
-            error?.message || "Check server connection and try again."
-          }`,
+          content: `Error querying database: ${error?.message || "Check server connection and try again."
+            }`,
         },
       ]);
     } finally {
@@ -156,8 +155,7 @@ export default function DeveloperAssistantPage() {
           type: newType,
           meta:
             newMeta.trim() ||
-            `${newType.toUpperCase()} · MANUAL ENTRY · ${
-              new Date().toISOString().split("T")[0]
+            `${newType.toUpperCase()} · MANUAL ENTRY · ${new Date().toISOString().split("T")[0]
             }`,
           description: newDesc.trim(),
         }),
@@ -297,16 +295,20 @@ export default function DeveloperAssistantPage() {
                         {msg.meta.nodesTraversed} nodes traversed ·{" "}
                         {msg.meta.time}s
                       </span>
-                      <span>•</span>
-                      <span
-                        className="px-2 py-0.5 text-[11px] font-medium rounded-full"
-                        style={{
-                          backgroundColor: "#D4EFDF",
-                          color: "#145A32",
-                        }}
-                      >
-                        {msg.meta.confidence}
-                      </span>
+                      {msg.meta.confidence && msg.meta.confidence.trim() ? (
+                        <>
+                          <span>•</span>
+                          <span
+                            className="px-2 py-0.5 text-[11px] font-medium rounded-full"
+                            style={{
+                              backgroundColor: "#D4EFDF",
+                              color: "#145A32",
+                            }}
+                          >
+                            {msg.meta.confidence}
+                          </span>
+                        </>
+                      ) : null}
                     </div>
                   )}
                 </div>
