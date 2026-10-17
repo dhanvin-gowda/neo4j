@@ -2,7 +2,14 @@
 
 import React, { useState, useRef, useEffect } from "react";
 
-type NodeType = "Decision" | "Reason" | "Bug" | "Fix";
+type NodeType =
+  | "Decision"
+  | "Reason"
+  | "Bug"
+  | "Fix"
+  | "Component"
+  | "Dependency"
+  | "Project";
 
 interface EvidenceNode {
   id: string;
@@ -95,13 +102,21 @@ export default function DeveloperAssistantPage() {
       ]);
 
       // 4. Render real traversed graph evidence cards
-      const validTypes: NodeType[] = ["Decision", "Reason", "Bug", "Fix"];
+      const validTypes: NodeType[] = [
+        "Decision",
+        "Reason",
+        "Bug",
+        "Fix",
+        "Component",
+        "Dependency",
+        "Project",
+      ];
       const returnedEvidence: EvidenceNode[] = Array.isArray(data.evidence)
         ? data.evidence.map((node: any, index: number) => ({
             id: String(node.id ?? `evidence-${index}`),
             type: validTypes.includes(node.type as NodeType)
               ? (node.type as NodeType)
-              : "Decision",
+              : "Component",
             meta: String(node.meta ?? "GRAPH EVIDENCE"),
             description: String(
               node.description ?? "No description available."
@@ -177,6 +192,21 @@ export default function DeveloperAssistantPage() {
 
   const getNodeColorStyles = (type: NodeType) => {
     switch (type) {
+      case "Component":
+        return {
+          backgroundColor: "#EEF4FB",
+          borderColor: "#D2E3F7",
+        };
+      case "Dependency":
+        return {
+          backgroundColor: "#F5F0FA",
+          borderColor: "#E4D8F3",
+        };
+      case "Project":
+        return {
+          backgroundColor: "#F0F2F5",
+          borderColor: "#DDE1E6",
+        };
       case "Decision":
       case "Reason":
         return {
@@ -192,6 +222,11 @@ export default function DeveloperAssistantPage() {
         return {
           backgroundColor: "#EDF7ED",
           borderColor: "#CDE9CE",
+        };
+      default:
+        return {
+          backgroundColor: "#F4EFE6",
+          borderColor: "#E5E3DA",
         };
     }
   };
@@ -297,6 +332,18 @@ export default function DeveloperAssistantPage() {
           <span className="font-medium text-[11px] uppercase tracking-wide">
             Try:
           </span>
+          <button
+            type="button"
+            onClick={() =>
+              handleAsk(
+                "Why did we change the authentication module, and could that change be related to the current API error?"
+              )
+            }
+            disabled={isTraversing}
+            className="px-2.5 py-1 rounded-[8px] bg-white border border-[#E5E3DA] hover:border-[#1F1E1B] hover:text-[#1F1E1B] transition-colors cursor-pointer text-xs disabled:opacity-40 font-medium text-[#1F1E1B]"
+          >
+            Auth change vs API error?
+          </button>
           <button
             type="button"
             onClick={() =>
@@ -435,6 +482,9 @@ export default function DeveloperAssistantPage() {
                     <option value="Reason">Reason (Tan / Beige)</option>
                     <option value="Bug">Bug (Orange-tinted)</option>
                     <option value="Fix">Fix (Green-tinted)</option>
+                    <option value="Component">Component (Soft Blue)</option>
+                    <option value="Dependency">Dependency (Lavender)</option>
+                    <option value="Project">Project (Soft Slate)</option>
                   </select>
                 </div>
 

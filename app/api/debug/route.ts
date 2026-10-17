@@ -4,7 +4,7 @@ import Groq from "groq-sdk";
 
 interface EvidenceNode {
   id: string;
-  type: "Decision" | "Reason" | "Bug" | "Fix";
+  type: "Decision" | "Reason" | "Bug" | "Fix" | "Component" | "Dependency" | "Project";
   meta: string;
   description: string;
 }
@@ -83,12 +83,14 @@ export async function POST(req: Request) {
 
     const evidenceMap = new Map<string, EvidenceNode>();
 
+    const recognizedTypes = ["Component", "Dependency", "Project", "Decision", "Reason", "Bug", "Fix"];
+
     records.forEach((row) => {
       // Primary matched node
       if (row.id && row.labels) {
         const type = (row.labels.find((l) =>
-          ["Decision", "Reason", "Bug", "Fix"].includes(l)
-        ) || row.labels[0] || "Decision") as EvidenceNode["type"];
+          recognizedTypes.includes(l)
+        ) || row.labels[0] || "Component") as EvidenceNode["type"];
 
         if (!evidenceMap.has(row.id)) {
           evidenceMap.set(row.id, {
@@ -114,7 +116,7 @@ export async function POST(req: Request) {
       // Connected graph node (1-hop traversal)
       if (row.connectedId && row.connectedLabels && row.connectedProps) {
         const connectedType = (row.connectedLabels.find((l) =>
-          ["Decision", "Reason", "Bug", "Fix"].includes(l)
+          recognizedTypes.includes(l)
         ) || row.connectedLabels[0] || "Fix") as EvidenceNode["type"];
 
         if (!evidenceMap.has(row.connectedId)) {
@@ -154,41 +156,41 @@ export async function POST(req: Request) {
           messages: [
             {
               role: "system",
-              content: `You are RepoMind AI, an expert project memory and debugging assistant for developers.
-Analyze the developer's question and answer using ONLY the supplied Neo4j graph evidence.
-1. Directly state the matching bug, architectural decision, reason, or fix from the evidence.
-2. Include specific issue IDs, PR numbers, or dates if mentioned in the metadata.
-3. Be direct, clear, and concise (2-4 sentences max). Never fabricate information not present in the graph evidence.`,
+              content: `You are a developer assistant. Answer the user's question in 1 or 2 brief sentences in plain text only.
+Rules:
+- Plain text only: do not use markdown, asterisks, bullet points, or lists.
+- Do not mention or reference the words "Decision", "Reason", or internal node IDs.
+- If asked why a component was changed and if it is related to an API error, explain why it was changed and directly address whether the error is related and how it was resolved based on the evidence.
+- Directly state the issue and the fix or outcome concisely based on the evidence.`,
             },
             {
               role: "user",
-              content: `Developer Query: ${query}\n\nRetrieved Graph Evidence:\n${JSON.stringify(
-                evidence,
-                null,
-                2
-              )}`,
+              content: `Query: ${query}\n\nEvidence:\n${JSON.stringify(evidence)}`,
             },
           ],
-          temperature: 0.2,
+          temperature: 0.1,
         });
 
         answer = completion.choices[0]?.message?.content?.trim() || "";
+        // Strip any residual markdown asterisks or bullet prefixes if present
+        answer = answer.replace(/[*_#`]/g, "").replace(/^[-•]\s*/gm, "").trim();
       } catch (llmErr) {
         console.warn("Groq completion failed, falling back to dynamic synthesis:", llmErr);
       }
     }
 
-    // Dynamic fallback grounded strictly in the retrieved nodes
+    // Dynamic fallback grounded strictly in the retrieved nodes in brief plain text
     if (!answer) {
       if (evidence.length === 0) {
-        answer = `No matching records found in your Neo4j project memory for "${query}". Try searching for keywords like "logout", "grpc", "jwt", "rate limiter", "redis", or "memory".`;
+        answer = `No matching records found in project memory for "${query}".`;
       } else {
-        const lines = evidence.map(
-          (e) => `• [${e.type.toUpperCase()}] ${e.meta ? `${e.meta}: ` : ""}${e.description}`
-        );
-        answer = `Found ${evidence.length} record(s) in Neo4j project memory for "${query}":\n\n${lines.join(
-          "\n"
-        )}`;
+        const bugNode = evidence.find((e) => e.type === "Bug");
+        const fixNode = evidence.find((e) => e.type === "Fix");
+        if (bugNode && fixNode) {
+          answer = `${bugNode.description}, which was resolved by: ${fixNode.description}.`;
+        } else {
+          answer = evidence[0].description;
+        }
       }
     }
 
