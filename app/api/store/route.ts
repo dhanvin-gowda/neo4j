@@ -1,122 +1,73 @@
 import { NextResponse } from "next/server";
-import neo4j from "neo4j-driver";
-import Groq from "groq-sdk";
-
-export const runtime = "nodejs";
-
-const driver = neo4j.driver(
-  process.env.NEO4J_URI!,
-  neo4j.auth.basic(
-    process.env.NEO4J_USERNAME!,
-    process.env.NEO4J_PASSWORD!
-  )
-);
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+import { runQuery } from "@/lib/neo4j";
 
 export async function POST(req: Request) {
-  const startedAt = Date.now();
-
   try {
     const body = await req.json();
-    const bug =
-      typeof body.bug === "string" ? body.bug.trim() : "";
+    const { type, meta, description, relatedToId, relationship } = body;
 
-    if (!bug || bug.length > 2000) {
+    const allowedTypes = [
+      "Decision",
+      "Reason",
+      "Bug",
+      "Fix",
+      "Component",
+      "Dependency",
+      "Project",
+    ];
+
+    if (!type || !allowedTypes.includes(type)) {
       return NextResponse.json(
-        { error: "Provide a bug description (max 2000 characters)." },
+        { error: `type must be one of: ${allowedTypes.join(", ")}` },
         { status: 400 }
       );
     }
 
-    const session = driver.session();
-
-    let evidence: {
-      id: string;
-      type: string;
-      meta: string;
-      description: string;
-    }[] = [];
-
-    try {
-      const result = await session.run(
-        `MATCH (n)
-         WHERE any(k IN keys(n)
-           WHERE toLower(toString(n[k])) CONTAINS toLower($bug))
-         RETURN elementId(n) AS id,
-                labels(n) AS labels,
-                properties(n) AS props
-         LIMIT 10`,
-        { bug }
+    if (!description || typeof description !== "string") {
+      return NextResponse.json(
+        { error: "description string is required" },
+        { status: 400 }
       );
-
-      evidence = result.records.map((record) => {
-        const labels = record.get("labels") as string[];
-        const props = record.get("props") as Record<string, unknown>;
-
-        const type =
-          labels.find((label) =>
-            ["Decision", "Reason", "Bug", "Fix"].includes(label)
-          ) ?? labels[0] ?? "Evidence";
-
-        return {
-          id: String(record.get("id")),
-          type,
-          meta: String(
-            props.title ??
-            props.name ??
-            props.issueId ??
-            labels.join(" · ")
-          ),
-          description: String(
-            props.description ??
-            props.summary ??
-            props.message ??
-            JSON.stringify(props)
-          ),
-        };
-      });
-    } finally {
-      await session.close();
     }
 
-    const completion = await groq.chat.completions.create({
-      model: "openai/gpt-oss-20b",
-      messages: [
-        {
-          role: "system",
-          content: `You are RepoMind AI, a repository debugging assistant.
-Use only the supplied evidence for claims about past project decisions,
-bugs, and fixes. Clearly distinguish evidence from hypotheses.
-If evidence is missing, say so. Never invent issue IDs, PRs, or verified fixes.
-Give a concise answer with the likely cause, recommended next step,
-and relevant evidence.`,
-        },
-        {
-          role: "user",
-          content: `Bug report:\n${bug}\n\nGraph evidence:\n${JSON.stringify(evidence)}`,
-        },
-      ],
-    });
+    const id = body.id || `node-${Date.now()}`;
+    const nodeMeta =
+      meta ||
+      `${type.toUpperCase()} · MANUAL ENTRY · ${
+        new Date().toISOString().split("T")[0]
+      }`;
+
+    const cypher = `
+      MERGE (n:${type} {id: $id})
+      SET n.meta = $meta, n.description = $description, n.createdAt = datetime()
+      RETURN n.id AS id, labels(n) AS labels, n.meta AS meta, n.description AS description
+    `;
+
+    const records = await runQuery<{
+      id: string;
+      labels: string[];
+      meta: string;
+      description: string;
+    }>(cypher, { id, meta: nodeMeta, description });
+
+    if (relatedToId && relationship) {
+      const relCypher = `
+        MATCH (a {id: $id}), (b {id: $relatedToId})
+        MERGE (a)-[r:${relationship.toUpperCase()}]->(b)
+        RETURN type(r) AS relType
+      `;
+      await runQuery(relCypher, { id, relatedToId });
+    }
 
     return NextResponse.json({
-      bug,
-      answer: completion.choices[0]?.message?.content ?? "",
-      contextFound: evidence.length > 0,
-      evidence,
-      nodesTraversed: evidence.length,
-      time: Number(((Date.now() - startedAt) / 1000).toFixed(2)),
-      confidence: evidence.length > 0
-        ? "evidence available"
-        : "no matching evidence",
+      success: true,
+      message: `Successfully stored ${type} node in Neo4j AuraDB!`,
+      node: records[0],
     });
-  } catch (error) {
-    console.error("RepoMind debug error:", error);
-
+  } catch (err: any) {
+    console.error("Neo4j /api/store error:", err);
     return NextResponse.json(
-      { error: "Debugging failed. Check server logs and configuration." },
+      { error: "Failed to store node in Neo4j", details: err?.message || String(err) },
       { status: 500 }
     );
   }
